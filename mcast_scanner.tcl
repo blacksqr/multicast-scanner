@@ -75,7 +75,6 @@ proc mcastscan::closeSocket {sock} {
 
 proc mcastscan::socketListener {sock} {
     set d [read $sock 1]
-    puts "peer = [fconfigure $sock]"
     set trafficKey [getTrafficKey $sock]
     set ::mcastscan::trafficStatus($trafficKey) "traffic"
     after cancel $::mcastscan::timeoutIdArray($sock)
@@ -106,25 +105,27 @@ proc mcastscan::checkForTraffic {ip port timeout} {
     set ::mcastscan::trafficStatus(${ip}:$port) "waiting"
 }
 
+proc doStatusCallout {statusUpdateProc key status} {
+    if {[string length $statusUpdateProc] && [llength [info procs $statusUpdateProc]]} {
+	catch {$statusUpdateProc $key $status}
+    }
+}
+
 # Returns a list like this:  trafficKey status [trafficKey status ...]
 # trafficKey is a string like this: ip:port (e.g. 224.0.0.10:7000)
 # status is one of the following strings:
 #    error - the socket for that key could not be created
 #    timeout - the timeout expired before any traffic was detected
 #    traffic - data was detected on the socket
-proc mcastscan::multicastScan {ipList portList {timeout 10}} {
+proc mcastscan::multicastScan {ipList portList {timeout 10} {statusUpdateProc ""}} {
     foreach ip $ipList {
 	foreach port $portList {
-	    puts "checking $ip $port"
 	    if {[checkForTraffic $ip $port $timeout] != "error"} {
 		vwait ::mcastscan::trafficStatus(${ip}:$port)
-		puts "status = $::mcastscan::trafficStatus(${ip}:$port)"
+		doStatusCallout $statusUpdateProc ${ip}:$port $::mcastscan::trafficStatus(${ip}:$port)
 	    }
 	}
     }
 
-    foreach trafficKey [array names ::trafficStatus] {
-	puts "$trafficKey = $::trafficStatus($trafficKey)"
-    }
     return [array get ::mcastscan::trafficStatus]
 }

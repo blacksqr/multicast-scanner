@@ -6,12 +6,16 @@ exec tclsh "$0" "$@"
 
 lappend auto_path [pwd]
 package require mcastscan
-set ipRange [mcastscan::expandIpList 224.0.0.10 224.0.0.11]
-set portRange [mcastscan::expandPortList 8000 8001]
+set ipRange [mcastscan::expandIpList [list 224.0.0.10 224.0.0.11]]
+set portRange [mcastscan::expandPortList [list 8000 8001]]
 
 package require mcastscan
 
-set statusList [mcastscan::multicastScan $ipRange $portRange 10]
+proc printUpdate {key status} {
+    puts "$key = $status"
+}
+
+set statusList [mcastscan::multicastScan $ipRange $portRange 10 printUpdate]
 
 foreach {key status} $statusList {
     puts "$key = $status"
