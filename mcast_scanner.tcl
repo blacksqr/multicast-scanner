@@ -10,11 +10,17 @@ package require udp
 
 namespace eval mcastscan {
     variable listeningSocketArray
+    variable openPortArray
     variable trafficStatus
     variable timeoutIdArray
+    variable statusUpdateProc
+    variable scannerStatus
     array set listeningSocketArray {}
+    array set openPortArray {}
     array set trafficStatus {}
     array set timeoutIdArray {}
+    set statusUpdateProc ""
+    set scannerStatus ""
 
     namespace export multicastScan expandIpList expandPortList
 }
@@ -62,9 +68,9 @@ proc mcastscan::expandIpList {ipList} {
     return $retList
 }
 
-proc mcastscan::getTrafficKey {sock} {
-    set trafficKey $::mcastscan::listeningSocketArray($sock)
-    return $trafficKey
+proc mcastscan::getTrafficKey {sock ip} {
+    set port $::mcastscan::listeningSocketArray($sock)
+    return ${ip}:$port
 }
 
 proc mcastscan::closeSocket {sock} {
@@ -74,40 +80,82 @@ proc mcastscan::closeSocket {sock} {
 }
 
 proc mcastscan::socketListener {sock} {
-    set d [read $sock 1]
-    set trafficKey [getTrafficKey $sock]
+    set d [read $sock]
+    set ip [fconfigure $sock -dstip]
+    set trafficKey [getTrafficKey $sock $ip]
+    if {![string equal $::mcastscan::trafficStatus($trafficKey) "waiting"]} {
+        # We have already received and counted traffic for this group, so just ignore this and move on
+	return
+    }
     set ::mcastscan::trafficStatus($trafficKey) "traffic"
-    after cancel $::mcastscan::timeoutIdArray($sock)
-    unset ::mcastscan::timeoutIdArray($sock)
-    closeSocket $sock
+    after cancel $::mcastscan::timeoutIdArray(${sock}:$ip)
+    unset ::mcastscan::timeoutIdArray(${sock}:$ip)
+    fconfigure $sock -mcastdrop $ip
+    if {![llength [fconfigure $sock -mcastgroups]]} {
+	closeSocket $sock
+    }
 }
 
-proc mcastscan::timeout {sock} {
-    set trafficKey [getTrafficKey $sock]
+proc mcastscan::timeout {sock ip} {
+    set trafficKey [getTrafficKey $sock $ip]
     set ::mcastscan::trafficStatus($trafficKey) "timeout"
-    unset ::mcastscan::timeoutIdArray($sock)
-    closeSocket $sock
+    unset ::mcastscan::timeoutIdArray(${sock}:$ip)
+    fconfigure $sock -mcastdrop $ip
+    if {![llength [fconfigure $sock -mcastgroups]]} {
+	closeSocket $sock
+    }
 }
 
 proc mcastscan::checkForTraffic {ip port timeout} {
+    if {[info exists ::mcastscan::openPortArray($port)]} {
+	set s $::mcastscan::openPortArray($port)
+    } else {
+	set socketStatus [catch {
+	    set s [udp_open $port]
+	    set ::mcastscan::openPortArray($port) $s
+	} err]
+	if {$socketStatus != 0} {
+	    set ::mcastscan::trafficStatus(${ip}:$port) "error"
+	    return error
+	}
+	set ::mcastscan::listeningSocketArray($s) $port
+	fileevent $s readable [list ::mcastscan::socketListener $s]
+    }
     set socketStatus [catch {
-	set s [udp_open $port]
 	fconfigure $s -mcastadd $ip
     } err]
     if {$socketStatus != 0} {
 	set ::mcastscan::trafficStatus(${ip}:$port) "error"
 	return error
     }
-    set ::mcastscan::listeningSocketArray($s) ${ip}:$port
-    fileevent $s readable [list ::mcastscan::socketListener $s]
-    set afterId [after [expr {$timeout * 1000}] [list ::mcastscan::timeout $s]]
-    set ::mcastscan::timeoutIdArray($s) $afterId
+
+    set afterId [after [expr {$timeout * 1000}] [list ::mcastscan::timeout $s $ip]]
+    set ::mcastscan::timeoutIdArray(${s}:$ip) $afterId
     set ::mcastscan::trafficStatus(${ip}:$port) "waiting"
 }
 
-proc doStatusCallout {statusUpdateProc key status} {
-    if {[string length $statusUpdateProc] && [llength [info procs $statusUpdateProc]]} {
-	catch {$statusUpdateProc $key $status}
+proc doStatusCallout {key status} {
+    if {[string length $::mcastscan::statusUpdateProc] && 
+	    [llength [info procs $::mcastscan::statusUpdateProc]]} {
+	catch {uplevel #0 $::mcastscan::statusUpdateProc $key $status}
+    }
+}
+
+proc checkTrafficStatus {statusArray key op} {
+    upvar $statusArray arr
+    doStatusCallout $key $arr($key)
+
+    # Check through all of the status elements to see if anything is still in
+    # the "waiting" state.  If there is nothing, then we are done
+    set stillWaiting 0
+    foreach {key val} [array get arr] {
+	if {[string equal $val "waiting"]} {
+	    set stillWaiting 1
+	    break
+	}
+    }
+    if {!$stillWaiting} {
+	set ::mcastscan::scannerStatus "done"
     }
 }
 
@@ -118,13 +166,20 @@ proc doStatusCallout {statusUpdateProc key status} {
 #    timeout - the timeout expired before any traffic was detected
 #    traffic - data was detected on the socket
 proc mcastscan::multicastScan {ipList portList {timeout 10} {statusUpdateProc ""}} {
+    set waitCount 0
+    set ::mcastscan::statusUpdateProc $statusUpdateProc
     foreach ip $ipList {
 	foreach port $portList {
 	    if {[checkForTraffic $ip $port $timeout] != "error"} {
-		vwait ::mcastscan::trafficStatus(${ip}:$port)
-		doStatusCallout $statusUpdateProc ${ip}:$port $::mcastscan::trafficStatus(${ip}:$port)
+		incr waitCount
 	    }
 	}
+    }
+
+    if {$waitCount} {
+	trace add variable ::mcastscan::trafficStatus write checkTrafficStatus
+	vwait ::mcastscan::scannerStatus
+	trace remove variable ::mcastscan::trafficStatus write checkTrafficStatus
     }
 
     return [array get ::mcastscan::trafficStatus]
