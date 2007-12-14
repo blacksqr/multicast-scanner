@@ -78,6 +78,8 @@ proc mcastscan::getTrafficKey {sock ip} {
 
 proc mcastscan::closeSocket {sock} {
     unset ::mcastscan::listeningSocketArray($sock)
+    set port $::mcastscan::listeningSocketArray($sock)
+    unset ::mcastscan::openPortArray($port)
     close $sock
 }
 
@@ -89,8 +91,6 @@ proc mcastscan::socketListener {sock} {
         # We have already received and counted traffic for this group, so just ignore this and move on
 	return
     }
-    set port $::mcastscan::listeningSocketArray($sock)
-    unset ::mcastscan::openPortArray($port)
     set ::mcastscan::trafficStatus($trafficKey) "traffic"
     after cancel $::mcastscan::timeoutIdArray(${sock}:$ip)
     unset ::mcastscan::timeoutIdArray(${sock}:$ip)
@@ -104,8 +104,6 @@ proc mcastscan::timeout {sock ip} {
     set trafficKey [getTrafficKey $sock $ip]
     set ::mcastscan::trafficStatus($trafficKey) "timeout"
     unset ::mcastscan::timeoutIdArray(${sock}:$ip)
-    set port $::mcastscan::listeningSocketArray($sock)
-    unset ::mcastscan::openPortArray($port)
     fconfigure $sock -mcastdrop $ip
     if {![llength [fconfigure $sock -mcastgroups]]} {
 	closeSocket $sock
