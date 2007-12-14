@@ -9,7 +9,10 @@ package provide mcastscan 1.0
 package require udp
 
 namespace eval mcastscan {
+    # The listeningSocketArray stores the UDP ports we are listening to indexed
+    # by the socket descriptor
     variable listeningSocketArray
+    # The openPortArray stores the open sockets indexed by the UDP port number
     variable openPortArray
     variable trafficStatus
     variable timeoutIdArray
@@ -74,7 +77,6 @@ proc mcastscan::getTrafficKey {sock ip} {
 }
 
 proc mcastscan::closeSocket {sock} {
-    #set trafficKey [getTrafficKey $sock]
     unset ::mcastscan::listeningSocketArray($sock)
     close $sock
 }
@@ -87,6 +89,8 @@ proc mcastscan::socketListener {sock} {
         # We have already received and counted traffic for this group, so just ignore this and move on
 	return
     }
+    set port $::mcastscan::listeningSocketArray($sock)
+    unset ::mcastscan::openPortArray($port)
     set ::mcastscan::trafficStatus($trafficKey) "traffic"
     after cancel $::mcastscan::timeoutIdArray(${sock}:$ip)
     unset ::mcastscan::timeoutIdArray(${sock}:$ip)
@@ -100,6 +104,8 @@ proc mcastscan::timeout {sock ip} {
     set trafficKey [getTrafficKey $sock $ip]
     set ::mcastscan::trafficStatus($trafficKey) "timeout"
     unset ::mcastscan::timeoutIdArray(${sock}:$ip)
+    set port $::mcastscan::listeningSocketArray($sock)
+    unset ::mcastscan::openPortArray($port)
     fconfigure $sock -mcastdrop $ip
     if {![llength [fconfigure $sock -mcastgroups]]} {
 	closeSocket $sock
@@ -182,5 +188,7 @@ proc mcastscan::multicastScan {ipList portList {timeout 10} {statusUpdateProc ""
 	trace remove variable ::mcastscan::trafficStatus write checkTrafficStatus
     }
 
-    return [array get ::mcastscan::trafficStatus]
+    set resultList [array get ::mcastscan::trafficStatus]
+    array unset ::mcastscan::trafficStatus
+    return $resultList
 }
