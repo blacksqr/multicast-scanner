@@ -91,12 +91,14 @@ proc mcastscan::socketListener {sock} {
         # We have already received and counted traffic for this group, so just ignore this and move on
 	return
     }
-    set ::mcastscan::trafficStatus($trafficKey) "traffic"
+
     if [info exists ::mcastscan::timeoutIdArray(${sock}:${ip})] {
         after cancel $::mcastscan::timeoutIdArray(${sock}:$ip)
         unset ::mcastscan::timeoutIdArray(${sock}:$ip)
     }
     fconfigure $sock -mcastdrop $ip
+    set ::mcastscan::trafficStatus($trafficKey) "traffic"
+
     if {![llength [fconfigure $sock -mcastgroups]]} {
 	closeSocket $sock
     }
