@@ -18,22 +18,14 @@ namespace eval mcastscan {
     variable timeoutIdArray
     variable statusUpdateProc
     variable scannerStatus
-    variable debug
     array set listeningSocketArray {}
     array set openPortArray {}
     array set trafficStatus {}
     array set timeoutIdArray {}
     set statusUpdateProc ""
     set scannerStatus ""
-    set debug 1
 
     namespace export multicastScan expandIpList expandPortList
-}
-
-proc DEBUG {msg} {
-    if {$::mcastscan::debug} {
-        puts "[clock format [clock seconds]] $msg"
-    }
 }
 
 proc mcastscan::expandPortList {portList} {
@@ -86,78 +78,70 @@ proc mcastscan::getTrafficKey {sock ip} {
 
 proc mcastscan::closeSocket {sock} {
     set port $::mcastscan::listeningSocketArray($sock)
-    DEBUG "closeSocket called for $sock $port"
-    unset ::mcastscan::listeningSocketArray($sock)
-    unset ::mcastscan::openPortArray($port)
+	unset ::mcastscan::listeningSocketArray($sock)
+	unset ::mcastscan::openPortArray($port)
     close $sock
 }
 
 proc mcastscan::socketListener {sock} {
-    if {[catch {set d [read $sock]} err]} {
-	# It is possible that timeout could be called and close the socket just
-	# before we are called.  If that happens, the read would throw an
-	# error.  I don't need to do anything with the error as timeout will
-	# already have marked the port as timed out.
-	DEBUG "read returned an error for $sock : $err"
-	return
-    }
     set ip [fconfigure $sock -dstip]
-    DEBUG "socketListener called for $sock $ip"
+	if [info exists ::mcastscan::timeoutIdArray(${sock}:${ip})] {
+		after cancel $::mcastscan::timeoutIdArray(${sock}:$ip)
+		unset ::mcastscan::timeoutIdArray(${sock}:$ip)
+	} else {
+		return
+	}
+    set d [read $sock]
+    fconfigure $sock -mcastdrop $ip
     set trafficKey [getTrafficKey $sock $ip]
     if {![string equal $::mcastscan::trafficStatus($trafficKey) "waiting"]} {
         # We have already received and counted traffic for this group, so just ignore this and move on
 	return
     }
-
-    if [info exists ::mcastscan::timeoutIdArray(${sock}:${ip})] {
-        after cancel $::mcastscan::timeoutIdArray(${sock}:$ip)
-        unset ::mcastscan::timeoutIdArray(${sock}:$ip)
-    }
-    fconfigure $sock -mcastdrop $ip
     set ::mcastscan::trafficStatus($trafficKey) "traffic"
-
     if {![llength [fconfigure $sock -mcastgroups]]} {
 	closeSocket $sock
     }
 }
 
 proc mcastscan::timeout {sock ip} {
-    DEBUG "timeout called for $sock $ip"
-    set trafficKey [getTrafficKey $sock $ip]
-    set ::mcastscan::trafficStatus($trafficKey) "timeout"
     unset ::mcastscan::timeoutIdArray(${sock}:$ip)
     fconfigure $sock -mcastdrop $ip
-    if {![llength [fconfigure $sock -mcastgroups]]} {
-	closeSocket $sock
+    set trafficKey [getTrafficKey $sock $ip]
+    set ::mcastscan::trafficStatus($trafficKey) "timeout"
+	if ![catch "fconfigure $sock -mcastgroups" mcastgroups] {
+	    if {![llength $mcastgroups]} {
+			closeSocket $sock
+		}
     }
 }
 
 proc mcastscan::checkForTraffic {ip port timeout} {
     if {[info exists ::mcastscan::openPortArray($port)]} {
-	set s $::mcastscan::openPortArray($port)
+		set s $::mcastscan::openPortArray($port)
     } else {
-	set socketStatus [catch {
-	    set s [udp_open $port]
-	    set ::mcastscan::openPortArray($port) $s
-	} err]
-	if {$socketStatus != 0} {
-	    set ::mcastscan::trafficStatus(${ip}:$port) "error"
-	    return error
-	}
-	set ::mcastscan::listeningSocketArray($s) $port
-	fileevent $s readable [list ::mcastscan::socketListener $s]
+		set socketStatus [catch {
+		    set s [udp_open $port]
+		    set ::mcastscan::openPortArray($port) $s
+		} err]
+		if {$socketStatus != 0} {
+		    set ::mcastscan::trafficStatus(${ip}:$port) "error"
+		    return error
+		}
+		set ::mcastscan::listeningSocketArray($s) $port
+		fileevent $s readable [list ::mcastscan::socketListener $s]
     }
+    set afterId [after [expr {$timeout * 1000}] [list ::mcastscan::timeout $s $ip]]
+    set ::mcastscan::timeoutIdArray(${s}:${ip}) $afterId
+    set ::mcastscan::trafficStatus(${ip}:$port) "waiting"
     set socketStatus [catch {
-	fconfigure $s -mcastadd $ip
+		fconfigure $s -mcastadd $ip
     } err]
     if {$socketStatus != 0} {
-	set ::mcastscan::trafficStatus(${ip}:$port) "error"
-	return error
+		set ::mcastscan::trafficStatus(${ip}:$port) "error"
+		return error
     }
 
-    set afterId [after [expr {$timeout * 1000}] [list ::mcastscan::timeout $s $ip]]
-    set ::mcastscan::timeoutIdArray(${s}:$ip) $afterId
-    set ::mcastscan::trafficStatus(${ip}:$port) "waiting"
 }
 
 proc doStatusCallout {key status} {
@@ -168,7 +152,6 @@ proc doStatusCallout {key status} {
 }
 
 proc checkTrafficStatus {statusArray key op} {
-    DEBUG "entering checkTrafficStatus"
     upvar $statusArray arr
     doStatusCallout $key $arr($key)
 
@@ -184,7 +167,6 @@ proc checkTrafficStatus {statusArray key op} {
     if {!$stillWaiting} {
 	set ::mcastscan::scannerStatus "done"
     }
-    DEBUG "leaving checkTrafficStatus"
 }
 
 # Returns a list like this:  trafficKey status [trafficKey status ...]
@@ -197,17 +179,17 @@ proc mcastscan::multicastScan {ipList portList {timeout 10} {statusUpdateProc ""
     set waitCount 0
     set ::mcastscan::statusUpdateProc $statusUpdateProc
     foreach ip $ipList {
-	foreach port $portList {
-	    if {[checkForTraffic $ip $port $timeout] != "error"} {
-		incr waitCount
-	    }
-	}
+		foreach port $portList {
+		    if {[checkForTraffic $ip $port $timeout] != "error"} {
+				incr waitCount
+		    }
+		}
     }
 
     if {$waitCount} {
-	trace add variable ::mcastscan::trafficStatus write checkTrafficStatus
-	vwait ::mcastscan::scannerStatus
-	trace remove variable ::mcastscan::trafficStatus write checkTrafficStatus
+		trace add variable ::mcastscan::trafficStatus write checkTrafficStatus
+		vwait ::mcastscan::scannerStatus
+		trace remove variable ::mcastscan::trafficStatus write checkTrafficStatus
     }
 
     set resultList [array get ::mcastscan::trafficStatus]
