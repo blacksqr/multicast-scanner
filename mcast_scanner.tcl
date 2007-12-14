@@ -93,7 +93,14 @@ proc mcastscan::closeSocket {sock} {
 }
 
 proc mcastscan::socketListener {sock} {
-    set d [read $sock]
+    if {[catch {set d [read $sock]} err]} {
+	# It is possible that timeout could be called and close the socket just
+	# before we are called.  If that happens, the read would throw an
+	# error.  I don't need to do anything with the error as timeout will
+	# already have marked the port as timed out.
+	DEBUG "read returned an error for $sock : $err"
+	return
+    }
     set ip [fconfigure $sock -dstip]
     DEBUG "socketListener called for $sock $ip"
     set trafficKey [getTrafficKey $sock $ip]
