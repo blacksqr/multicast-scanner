@@ -18,14 +18,22 @@ namespace eval mcastscan {
     variable timeoutIdArray
     variable statusUpdateProc
     variable scannerStatus
+    variable debug
     array set listeningSocketArray {}
     array set openPortArray {}
     array set trafficStatus {}
     array set timeoutIdArray {}
     set statusUpdateProc ""
     set scannerStatus ""
+    set debug 1
 
     namespace export multicastScan expandIpList expandPortList
+}
+
+proc DEBUG {msg} {
+    if {$::mcastscan::debug} {
+        puts "[clock format [clock seconds]] $msg"
+    }
 }
 
 proc mcastscan::expandPortList {portList} {
@@ -78,6 +86,7 @@ proc mcastscan::getTrafficKey {sock ip} {
 
 proc mcastscan::closeSocket {sock} {
     set port $::mcastscan::listeningSocketArray($sock)
+    DEBUG "closeSocket called for $sock $port"
     unset ::mcastscan::listeningSocketArray($sock)
     unset ::mcastscan::openPortArray($port)
     close $sock
@@ -86,6 +95,7 @@ proc mcastscan::closeSocket {sock} {
 proc mcastscan::socketListener {sock} {
     set d [read $sock]
     set ip [fconfigure $sock -dstip]
+    DEBUG "socketListener called for $sock $ip"
     set trafficKey [getTrafficKey $sock $ip]
     if {![string equal $::mcastscan::trafficStatus($trafficKey) "waiting"]} {
         # We have already received and counted traffic for this group, so just ignore this and move on
@@ -105,6 +115,7 @@ proc mcastscan::socketListener {sock} {
 }
 
 proc mcastscan::timeout {sock ip} {
+    DEBUG "timeout called for $sock $ip"
     set trafficKey [getTrafficKey $sock $ip]
     set ::mcastscan::trafficStatus($trafficKey) "timeout"
     unset ::mcastscan::timeoutIdArray(${sock}:$ip)
@@ -150,6 +161,7 @@ proc doStatusCallout {key status} {
 }
 
 proc checkTrafficStatus {statusArray key op} {
+    DEBUG "entering checkTrafficStatus"
     upvar $statusArray arr
     doStatusCallout $key $arr($key)
 
@@ -165,6 +177,7 @@ proc checkTrafficStatus {statusArray key op} {
     if {!$stillWaiting} {
 	set ::mcastscan::scannerStatus "done"
     }
+    DEBUG "leaving checkTrafficStatus"
 }
 
 # Returns a list like this:  trafficKey status [trafficKey status ...]
