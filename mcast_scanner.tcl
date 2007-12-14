@@ -77,8 +77,8 @@ proc mcastscan::getTrafficKey {sock ip} {
 }
 
 proc mcastscan::closeSocket {sock} {
-    unset ::mcastscan::listeningSocketArray($sock)
     set port $::mcastscan::listeningSocketArray($sock)
+    unset ::mcastscan::listeningSocketArray($sock)
     unset ::mcastscan::openPortArray($port)
     close $sock
 }
