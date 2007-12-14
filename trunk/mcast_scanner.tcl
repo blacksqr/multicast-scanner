@@ -92,8 +92,10 @@ proc mcastscan::socketListener {sock} {
 	return
     }
     set ::mcastscan::trafficStatus($trafficKey) "traffic"
-    after cancel $::mcastscan::timeoutIdArray(${sock}:$ip)
-    unset ::mcastscan::timeoutIdArray(${sock}:$ip)
+    if [info exists ::mcastscan::timeoutIdArray(${sock}:${ip})] {
+        after cancel $::mcastscan::timeoutIdArray(${sock}:$ip)
+        unset ::mcastscan::timeoutIdArray(${sock}:$ip)
+    }
     fconfigure $sock -mcastdrop $ip
     if {![llength [fconfigure $sock -mcastgroups]]} {
 	closeSocket $sock
