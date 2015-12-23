@@ -1,0 +1,1 @@
+The Multicast Scanner scans a list of IP addresses and UDP ports to detect multicast traffic on a network.  The scanner is implemented in Tcl and relies on the tcludp extension.
